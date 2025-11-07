@@ -56,7 +56,7 @@ public class HubCryptoAdapter {
             hubAvailable = true; // 성공 시 연결 가능으로 표시
             return encrypted;
         } catch (Exception e) {
-            log.error("❌ 암호화 실패: policy={}, error={}", policyName, e.getMessage());
+            log.error("❌ 암호화 실패: policy={}, error={}", policyName, e.getMessage(), e);
             hubAvailable = false; // 실패 시 연결 불가로 표시
             
             if (failOpen) {
@@ -94,7 +94,7 @@ public class HubCryptoAdapter {
             hubAvailable = true; // 성공 시 연결 가능으로 표시
             return decrypted;
         } catch (Exception e) {
-            log.error("❌ 복호화 실패: error={}", e.getMessage());
+            log.error("❌ 복호화 실패: error={}", e.getMessage(), e);
             hubAvailable = false; // 실패 시 연결 불가로 표시
             
             if (failOpen) {

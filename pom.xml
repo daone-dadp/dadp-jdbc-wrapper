@@ -6,11 +6,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.daone-dadp</groupId>
-    <artifactId>dadp-jdbc-wrapper-parent</artifactId>
+    <artifactId>dadp-jdbc-wrapper</artifactId>
     <version>3.0.0</version>
-    <packaging>pom</packaging>
+    <packaging>jar</packaging>
 
-    <name>DADP JDBC Wrapper Parent</name>
+    <name>DADP JDBC Wrapper</name>
     <description>DADP JDBC Wrapper Driver - DB 자동 암복호화 Proxy</description>
     <url>https://github.com/daone-dadp/dadp-jdbc-wrapper</url>
 
@@ -59,18 +59,6 @@
         <junit.version>5.10.0</junit.version>
     </properties>
 
-    <modules>
-        <module>dadp-jdbc-wrapper</module>
-    </modules>
-
-    <repositories>
-        <!-- JitPack Repository (dadp-hub-crypto-lib 참조용) -->
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-    </repositories>
-
     <dependencyManagement>
         <dependencies>
             <!-- Spring Boot BOM (Spring Boot 관련 의존성 버전 자동 관리) -->
@@ -112,6 +100,47 @@
         </dependencies>
     </dependencyManagement>
 
+    <dependencies>
+        <!-- Hub 암복호화 라이브러리 (필수) -->
+        <dependency>
+            <groupId>io.github.daone-dadp</groupId>
+            <artifactId>dadp-hub-crypto-lib</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        
+        <!-- Jackson for JSON processing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        
+        <!-- 
+        DB 드라이버는 pom.xml에 포함하지 않음
+        고객사가 lib 폴더에 필요한 드라이버 JAR를 직접 배치
+        JDBC ServiceLoader 메커니즘이 클래스패스에서 자동으로 드라이버를 찾음
+        테스트 시에도 lib 폴더의 드라이버를 사용하여 실제 운영 환경과 동일하게 테스트
+        -->
+        
+        <!-- SLF4J for logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        
+        <!-- Test dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <!-- GPG 서명 플러그인 -->
@@ -149,7 +178,17 @@
                 </configuration>
             </plugin>
 
-            <!-- 소스 생성 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+            
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
@@ -163,8 +202,7 @@
                     </execution>
                 </executions>
             </plugin>
-
-            <!-- Javadoc 생성 -->
+            
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
@@ -178,22 +216,57 @@
                     </execution>
                 </executions>
             </plugin>
+            
+            <!-- Fat JAR 빌드 (모든 의존성 포함, DB 드라이버 제외) -->
+            <!-- 재빌드 없이 WAS 공통 라이브러리 디렉토리에 배치하여 사용 가능 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>all</shadedClassifierName>
+                            <filters>
+                                <!-- Spring/Servlet/SLF4J 등은 절대 포함 금지 -->
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <!-- Spring 관련 클래스 모두 제외 -->
+                                        <exclude>org/springframework/**</exclude>
+                                        <exclude>org/springframework/boot/**</exclude>
+                                        <!-- Servlet 관련 클래스 제외 -->
+                                        <exclude>jakarta/servlet/**</exclude>
+                                        <exclude>javax/servlet/**</exclude>
+                                        <!-- Logback 구현체 제외 -->
+                                        <exclude>ch/qos/logback/**</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <!-- ServiceLoader 지원을 위한 META-INF/services 병합 -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- MANIFEST.MF 병합 -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <manifestEntries>
+                                        <Built-By>DADP Development Team</Built-By>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                            <minimizeJar>true</minimizeJar>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
-
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.11.0</version>
-                    <configuration>
-                        <source>17</source>
-                        <target>17</target>
-                        <encoding>UTF-8</encoding>
-                    </configuration>
-                </plugin>
-            </plugins>
-        </pluginManagement>
     </build>
 </project>
-

@@ -14,19 +14,14 @@ JDBC URL만 변경하여 코드 수정 없이 자동 암복호화를 제공하�
 
 ### Maven 설정
 
-```xml
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
+Maven Central에서 자동으로 다운로드됩니다. 별도의 repository 설정이 필요 없습니다.
 
+```xml
 <dependencies>
     <dependency>
-        <groupId>com.github.daone-dadp</groupId>
+        <groupId>io.github.daone-dadp</groupId>
         <artifactId>dadp-jdbc-wrapper</artifactId>
-        <version>v3.0.0</version>
+        <version>3.0.0</version>
         <classifier>all</classifier>
     </dependency>
 </dependencies>
@@ -75,8 +70,8 @@ java -Dloader.path=libs -jar app.jar
 ## 🔗 링크
 
 - **GitHub**: https://github.com/daone-dadp/dadp-jdbc-wrapper
-- **JitPack**: https://jitpack.io/#daone-dadp/dadp-jdbc-wrapper
-- **배포 상태**: ⏳ 배포 예정
+- **Maven Central**: https://repo1.maven.org/maven2/io/github/daone-dadp/dadp-jdbc-wrapper/
+- **배포 상태**: ✅ Maven Central 배포 완료
 
 ## 📄 라이선스
 
