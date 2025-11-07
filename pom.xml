@@ -6,11 +6,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.daone-dadp</groupId>
-    <artifactId>dadp-jdbc-wrapper</artifactId>
+    <artifactId>dadp-jdbc-wrapper-parent</artifactId>
     <version>3.0.0</version>
     <packaging>pom</packaging>
 
-    <name>DADP JDBC Wrapper</name>
+    <name>DADP JDBC Wrapper Parent</name>
     <description>DADP JDBC Wrapper Driver - DB 자동 암복호화 Proxy</description>
     <url>https://github.com/daone-dadp/dadp-jdbc-wrapper</url>
 
@@ -53,7 +53,10 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-boot.version>3.2.12</spring-boot.version>
         <jackson.version>2.15.3</jackson.version>
+        <slf4j.version>2.0.9</slf4j.version>
+        <junit.version>5.10.0</junit.version>
     </properties>
 
     <modules>
@@ -70,11 +73,34 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring Boot BOM (Spring Boot 관련 의존성 버전 자동 관리) -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            
             <!-- Jackson 버전 관리 -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
                 <version>${jackson.version}</version>
+            </dependency>
+            
+            <!-- SLF4J 버전 관리 -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            
+            <!-- JUnit 버전 관리 -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.version}</version>
             </dependency>
             
             <!-- Internal Dependencies -->
