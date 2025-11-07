@@ -145,7 +145,8 @@ public class DadpProxyConnection implements Connection {
             try {
                 Thread.sleep(1500); // 스키마 동기화 후 실행
                 int count = mappingSyncService.loadMappingsFromHub();
-                log.trace("✅ 정책 매핑 정보 로드 완료: {}개 매핑", count);
+                // 초기 로드 완료는 INFO 레벨로 로그 출력 (초기화 확인용)
+                log.info("✅ 정책 매핑 정보 초기 로드 완료: {}개 매핑", count);
             } catch (Exception e) {
                 log.warn("⚠️ 정책 매핑 정보 로드 실패 (무시): {}", e.getMessage());
                 // 로드 실패 시 플래그 제거하여 재시도 가능하도록
@@ -179,7 +180,8 @@ public class DadpProxyConnection implements Connection {
             return;
         }
         
-        // 30초마다 변경사항 확인 (경량 요청)
+        // 초기 로드 후 즉시 첫 번째 변경사항 확인 (초기 지연 0초)
+        // 이후 30초마다 변경사항 확인 (경량 요청)
         scheduler.scheduleAtFixedRate(() -> {
             try {
                 // 변경사항 확인 (경량 요청)
@@ -194,7 +196,7 @@ public class DadpProxyConnection implements Connection {
             } catch (Exception e) {
                 log.warn("⚠️ 정책 매핑 변경사항 확인 실패: {}", e.getMessage());
             }
-        }, 30, 30, TimeUnit.SECONDS); // 초기 지연 30초, 이후 30초마다
+        }, 0, 30, TimeUnit.SECONDS); // 초기 지연 0초 (즉시 실행), 이후 30초마다
         
         log.info("✅ 정책 매핑 변경사항 확인 시작: proxyInstanceId={}, 주기=30초", instanceId);
     }
@@ -285,7 +287,8 @@ public class DadpProxyConnection implements Connection {
         if (!closed) {
             actualConnection.close();
             closed = true;
-            log.debug("✅ DADP Proxy Connection 종료");
+            // TRACE 레벨로 변경: 연결 풀에서 여러 Connection이 종료될 때 로그 스팸 방지
+            log.trace("✅ DADP Proxy Connection 종료");
         }
     }
     
