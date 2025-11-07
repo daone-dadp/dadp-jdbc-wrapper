@@ -28,46 +28,24 @@ public class SchemaRecognizer {
     public List<SchemaMetadata> collectSchemaMetadata(Connection connection) throws SQLException {
         List<SchemaMetadata> schemas = new ArrayList<>();
         
-<<<<<<< HEAD
-=======
         // 시스템 스키마 제외 목록 (MySQL, PostgreSQL 등 공통)
         final String[] EXCLUDED_SCHEMAS = {
             "information_schema", "performance_schema", "sys", "mysql", 
             "pg_catalog", "pg_toast", "pg_temp_1", "pg_toast_temp_1"
         };
         
->>>>>>> master
         try {
             DatabaseMetaData metaData = connection.getMetaData();
             String databaseName = connection.getCatalog();
             
             log.trace("🔍 스키마 메타데이터 수집 시작: database={}", databaseName);
             
-<<<<<<< HEAD
-            // 테이블 목록 조회
-            try (ResultSet tables = metaData.getTables(null, null, "%", new String[]{"TABLE"})) {
-=======
             // 현재 데이터베이스의 테이블만 조회 (시스템 스키마 제외)
             try (ResultSet tables = metaData.getTables(databaseName, null, "%", new String[]{"TABLE"})) {
->>>>>>> master
                 while (tables.next()) {
                     String tableName = tables.getString("TABLE_NAME");
                     String tableSchema = tables.getString("TABLE_SCHEM");
                     
-<<<<<<< HEAD
-                    log.trace("📋 테이블 발견: {}.{}", tableSchema, tableName);
-                    
-                    // 컬럼 정보 조회
-                    try (ResultSet columns = metaData.getColumns(null, tableSchema, tableName, "%")) {
-                        while (columns.next()) {
-                            SchemaMetadata schema = new SchemaMetadata();
-                            schema.setDatabaseName(databaseName);
-                            schema.setTableName(tableName);
-                            schema.setColumnName(columns.getString("COLUMN_NAME"));
-                            schema.setColumnType(columns.getString("TYPE_NAME"));
-                            schema.setIsNullable("YES".equals(columns.getString("IS_NULLABLE")));
-                            schema.setColumnDefault(columns.getString("COLUMN_DEF"));
-=======
                     // 시스템 스키마 제외
                     if (tableSchema != null) {
                         String lowerSchema = tableSchema.toLowerCase();
@@ -107,7 +85,6 @@ public class SchemaRecognizer {
                             schema.setColumnType(columnType);
                             schema.setIsNullable("YES".equals(columns.getString("IS_NULLABLE")));
                             schema.setColumnDefault(columnDefault);
->>>>>>> master
                             
                             schemas.add(schema);
                             
@@ -128,8 +105,6 @@ public class SchemaRecognizer {
     }
     
     /**
-<<<<<<< HEAD
-=======
      * 암복호화 대상에서 제외할 컬럼인지 확인
      * 
      * @param columnName 컬럼명
@@ -203,7 +178,6 @@ public class SchemaRecognizer {
     }
     
     /**
->>>>>>> master
      * 스키마 메타데이터 DTO
      */
     public static class SchemaMetadata {
@@ -264,4 +238,3 @@ public class SchemaRecognizer {
         }
     }
 }
-

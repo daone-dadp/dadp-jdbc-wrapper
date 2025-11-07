@@ -77,7 +77,8 @@ public class SchemaSyncService {
             log.info("📤 스키마 변경 감지, Hub로 동기화 전송: {}개 컬럼", schemas.size());
             
             // Hub API로 전송
-            String syncUrl = hubUrl + "/api/v1/proxy/schema/sync";
+            String syncUrl = hubUrl + "/hub/api/v1/proxy/schema/sync";
+            log.debug("🔗 Hub 스키마 동기화 URL: {}", syncUrl);
             
             SchemaSyncRequest request = new SchemaSyncRequest();
             request.setProxyInstanceId(proxyInstanceId);

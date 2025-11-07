@@ -4,11 +4,10 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-<<<<<<< HEAD
 
     <groupId>io.github.daone-dadp</groupId>
     <artifactId>dadp-jdbc-wrapper</artifactId>
-    <version>3.0.0</version>
+    <version>3.0.1</version>
     <packaging>jar</packaging>
 
     <name>DADP JDBC Wrapper</name>
@@ -49,28 +48,11 @@
             <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
         </repository>
     </distributionManagement>
-=======
-    
-    <parent>
-        <groupId>com.dadp</groupId>
-        <artifactId>dadp</artifactId>
-        <version>2.0.0</version>
-        <relativePath>../pom.xml</relativePath>
-    </parent>
-    
-    <artifactId>dadp-jdbc-wrapper</artifactId>
-    <version>3.0.0</version>
-    <packaging>jar</packaging>
-    
-    <name>DADP JDBC Wrapper</name>
-    <description>DADP JDBC Wrapper Driver - DB 자동 암복호화 Proxy</description>
->>>>>>> master
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-<<<<<<< HEAD
         <spring-boot.version>3.2.12</spring-boot.version>
         <jackson.version>2.15.3</jackson.version>
         <slf4j.version>2.0.9</slf4j.version>
@@ -122,14 +104,6 @@
         <!-- Hub 암복호화 라이브러리 (필수) -->
         <dependency>
             <groupId>io.github.daone-dadp</groupId>
-=======
-    </properties>
-
-    <dependencies>
-        <!-- Hub 암복호화 라이브러리 (필수) -->
-        <dependency>
-            <groupId>com.dadp</groupId>
->>>>>>> master
             <artifactId>dadp-hub-crypto-lib</artifactId>
             <version>1.0.0</version>
         </dependency>
@@ -169,7 +143,6 @@
 
     <build>
         <plugins>
-<<<<<<< HEAD
             <!-- GPG 서명 플러그인 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -209,11 +182,6 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
-=======
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
->>>>>>> master
                 <configuration>
                     <source>17</source>
                     <target>17</target>
@@ -224,10 +192,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
-<<<<<<< HEAD
                 <version>3.3.0</version>
-=======
->>>>>>> master
                 <executions>
                     <execution>
                         <id>attach-sources</id>
@@ -241,10 +206,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-<<<<<<< HEAD
                 <version>3.5.0</version>
-=======
->>>>>>> master
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>
@@ -255,19 +217,12 @@
                 </executions>
             </plugin>
             
-<<<<<<< HEAD
             <!-- Fat JAR 빌드 (모든 의존성 포함, DB 드라이버 제외) -->
-=======
-            <!-- Fat JAR 빌드 (모든 의존성 포함) -->
->>>>>>> master
             <!-- 재빌드 없이 WAS 공통 라이브러리 디렉토리에 배치하여 사용 가능 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-<<<<<<< HEAD
                 <version>3.5.2</version>
-=======
->>>>>>> master
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -315,7 +270,3 @@
         </plugins>
     </build>
 </project>
-<<<<<<< HEAD
-=======
-
->>>>>>> master
