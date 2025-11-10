@@ -191,7 +191,7 @@ public class DadpProxyConnection implements Connection {
                     int count = mappingSyncService.loadMappingsFromHub();
                     log.info("🔄 정책 매핑 변경사항 반영 완료: {}개 매핑", count);
                 } else {
-                    log.debug("⏭️ 정책 매핑 변경사항 없음");
+                    log.trace("⏭️ 정책 매핑 변경사항 없음");
                 }
             } catch (Exception e) {
                 log.warn("⚠️ 정책 매핑 변경사항 확인 실패: {}", e.getMessage());

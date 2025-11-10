@@ -40,6 +40,8 @@ public class HubCryptoAdapter {
     /**
      * 암호화
      * 
+     * Wrapper는 성공/실패만 판단하며, 메시지는 Engine에 의존합니다.
+     * 
      * @param data 평문 데이터
      * @param policyName 정책명
      * @return 암호화된 데이터 (실패 시 failOpen 모드에 따라 원본 반환 또는 예외)
@@ -56,7 +58,8 @@ public class HubCryptoAdapter {
             hubAvailable = true; // 성공 시 연결 가능으로 표시
             return encrypted;
         } catch (Exception e) {
-            log.error("❌ 암호화 실패: policy={}, error={}", policyName, e.getMessage(), e);
+            // 실패 처리: 메시지 파싱 없이 단순히 성공/실패만 판단
+            log.error("❌ 암호화 실패: {}", e.getMessage());
             hubAvailable = false; // 실패 시 연결 불가로 표시
             
             if (failOpen) {
@@ -74,7 +77,8 @@ public class HubCryptoAdapter {
      * 복호화
      * 
      * Proxy에서는 암호화 여부를 판단하지 않고, 정책 매핑이 있으면 무조건 Hub에 요청합니다.
-     * Hub에서 암호화 여부를 판단하고 처리합니다.
+     * Hub/Engine에서 암호화 여부를 판단하고 처리합니다.
+     * Wrapper는 성공/실패만 판단하며, 메시지는 Engine에 의존합니다.
      * 
      * @param encryptedData 암호화된 데이터 (또는 일반 텍스트)
      * @return 복호화된 데이터 (실패 시 failOpen 모드에 따라 원본 반환 또는 예외)
@@ -86,22 +90,27 @@ public class HubCryptoAdapter {
         
         try {
             log.debug("🔓 복호화 요청: dataLength={}", encryptedData != null ? encryptedData.length() : 0);
-            // Proxy에서는 암호화 여부를 판단하지 않고 Hub에 요청
-            // Hub에서 암호화 여부를 판단하고 처리
+            // Hub/Engine에서 암호화 여부 판단 및 처리
             String decrypted = hubCryptoService.decrypt(encryptedData);
+            
+            // null 반환 시 "데이터가 암호화되지 않았습니다" 의미 (원본 데이터 반환)
+            if (decrypted == null) {
+                log.debug("데이터가 암호화되지 않았습니다 - 원본 데이터 반환");
+                return encryptedData;
+            }
             
             log.debug("✅ 복호화 완료");
             hubAvailable = true; // 성공 시 연결 가능으로 표시
             return decrypted;
         } catch (Exception e) {
-            log.error("❌ 복호화 실패: error={}", e.getMessage(), e);
+            // 실제 에러만 처리 (HubCryptoService에서 "데이터가 암호화되지 않았습니다"는 null 반환하므로 여기까지 오지 않음)
+            String errorMessage = e.getMessage() != null ? e.getMessage() : "";
+            log.error("❌ 복호화 실패: {}", errorMessage);
             hubAvailable = false; // 실패 시 연결 불가로 표시
             
             if (failOpen) {
                 // Fail-open 모드: 원본 데이터 반환
-                // Hub가 "암호화된 데이터에서 정책 정보를 추출할 수 없습니다" 같은 에러를 반환하면
-                // 암호화되지 않은 데이터이므로 원본 반환
-                log.warn("⚠️ Fail-open 모드: 원본 데이터 반환 (Hub에서 암호화 여부 판단)");
+                log.warn("⚠️ Fail-open 모드: 원본 데이터 반환");
                 return encryptedData;
             } else {
                 // Fail-closed 모드: 예외 발생

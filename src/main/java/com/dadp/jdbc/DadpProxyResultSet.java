@@ -111,17 +111,16 @@ public class DadpProxyResultSet implements ResultSet {
                     // 복호화 대상: Hub를 통해 복호화
                     HubCryptoAdapter adapter = proxyConnection.getHubCryptoAdapter();
                     if (adapter != null) {
-                        try {
-                            String decrypted = adapter.decrypt(value);
+                        // HubCryptoAdapter에서 에러 처리 및 로그 출력 담당
+                        String decrypted = adapter.decrypt(value);
+                        // decrypted는 null이거나 원본 데이터 (HubCryptoAdapter에서 처리)
+                        if (decrypted != null) {
                             log.info("🔓 복호화 완료: {}.{} → {} (정책: {})", tableName, columnName, 
-                                     decrypted != null && decrypted.length() > 20 ? decrypted.substring(0, 20) + "..." : decrypted, 
+                                     decrypted.length() > 20 ? decrypted.substring(0, 20) + "..." : decrypted, 
                                      policyName);
                             return decrypted;
-                        } catch (Exception e) {
-                            log.error("❌ 복호화 실패: {}.{} (정책: {}), 원본 데이터 반환", 
-                                     tableName, columnName, policyName);
-                            // 복호화 실패 시 원본 데이터 반환 (Fail-open)
                         }
+                        // value가 null인 경우 원본 반환
                     } else {
                         log.warn("⚠️ Hub 어댑터가 초기화되지 않았습니다: {}.{} (정책: {}), 원본 데이터 반환", 
                                 tableName, columnName, policyName);
@@ -161,17 +160,16 @@ public class DadpProxyResultSet implements ResultSet {
                         // 복호화 대상: Hub를 통해 복호화
                         HubCryptoAdapter adapter = proxyConnection.getHubCryptoAdapter();
                         if (adapter != null) {
-                            try {
-                                String decrypted = adapter.decrypt(value);
+                            // HubCryptoAdapter에서 에러 처리 및 로그 출력 담당
+                            String decrypted = adapter.decrypt(value);
+                            // decrypted는 null이거나 원본 데이터 (HubCryptoAdapter에서 처리)
+                            if (decrypted != null) {
                                 log.debug("🔓 복호화 완료: {}.{} → {} (정책: {})", tableName, columnName, 
-                                         decrypted != null && decrypted.length() > 20 ? decrypted.substring(0, 20) + "..." : decrypted, 
+                                         decrypted.length() > 20 ? decrypted.substring(0, 20) + "..." : decrypted, 
                                          policyName);
                                 return decrypted;
-                            } catch (Exception e) {
-                                log.error("❌ 복호화 실패: {}.{} (정책: {}), 원본 데이터 반환", 
-                                         tableName, columnName, policyName);
-                                // 복호화 실패 시 원본 데이터 반환 (Fail-open)
                             }
+                            // value가 null인 경우 원본 반환
                         } else {
                             log.warn("⚠️ Hub 어댑터가 초기화되지 않았습니다: {}.{} (정책: {}), 원본 데이터 반환", 
                                     tableName, columnName, policyName);

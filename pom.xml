@@ -53,11 +53,51 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.2.12</spring-boot.version>
-        <jackson.version>2.15.3</jackson.version>
-        <slf4j.version>2.0.9</slf4j.version>
-        <junit.version>5.10.0</junit.version>
+        <spring-boot.version>2.7.18</spring-boot.version>
+        <jackson.version>2.13.5</jackson.version>
+        <slf4j.version>1.7.36</slf4j.version>
+        <junit.version>5.9.3</junit.version>
+        <java.version>17</java.version>
+        <classifier></classifier>
     </properties>
+
+    <profiles>
+        <!-- Java 8 프로파일 -->
+        <profile>
+            <id>java8</id>
+            <properties>
+                <maven.compiler.source>1.8</maven.compiler.source>
+                <maven.compiler.target>1.8</maven.compiler.target>
+                <java.version>8</java.version>
+                <classifier>java8</classifier>
+            </properties>
+        </profile>
+
+        <!-- Java 11 프로파일 -->
+        <profile>
+            <id>java11</id>
+            <properties>
+                <maven.compiler.source>11</maven.compiler.source>
+                <maven.compiler.target>11</maven.compiler.target>
+                <java.version>11</java.version>
+                <classifier>java11</classifier>
+            </properties>
+        </profile>
+
+        <!-- Java 17 프로파일 (기본) -->
+        <profile>
+            <id>java17</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <maven.compiler.source>17</maven.compiler.source>
+                <maven.compiler.target>17</maven.compiler.target>
+                <java.version>17</java.version>
+                <classifier>java17</classifier>
+            </properties>
+        </profile>
+    </profiles>
 
     <dependencyManagement>
         <dependencies>
@@ -93,7 +133,7 @@
             
             <!-- Internal Dependencies -->
             <dependency>
-                <groupId>io.github.daone-dadp</groupId>
+                <groupId>com.dadp</groupId>
                 <artifactId>dadp-hub-crypto-lib</artifactId>
                 <version>1.0.0</version>
             </dependency>
@@ -101,11 +141,12 @@
     </dependencyManagement>
 
     <dependencies>
-        <!-- Hub 암복호화 라이브러리 (필수) -->
+        <!-- Hub 암복호화 라이브러리 (필수) - Java 버전별 classifier 사용 -->
         <dependency>
-            <groupId>io.github.daone-dadp</groupId>
+            <groupId>com.dadp</groupId>
             <artifactId>dadp-hub-crypto-lib</artifactId>
             <version>1.0.0</version>
+            <classifier>${classifier}</classifier>
         </dependency>
         
         <!-- Jackson for JSON processing -->
@@ -121,10 +162,11 @@
         테스트 시에도 lib 폴더의 드라이버를 사용하여 실제 운영 환경과 동일하게 테스트
         -->
         
-        <!-- SLF4J for logging -->
+        <!-- SLF4J for logging (provided scope: 앱에서 제공하는 버전 사용) -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <scope>provided</scope>
         </dependency>
         
         <!-- Test dependencies -->
@@ -183,10 +225,39 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>17</source>
-                    <target>17</target>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
                     <encoding>UTF-8</encoding>
                 </configuration>
+            </plugin>
+
+            <!-- Java 버전별 classifier로 JAR 생성 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <!-- 기본 JAR 생성 -->
+                    <execution>
+                        <id>default-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                    <!-- Classifier가 있는 JAR 생성 (classifier가 있을 때만) -->
+                    <execution>
+                        <id>classifier-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>${classifier}</classifier>
+                            <skipIfEmpty>true</skipIfEmpty>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             
             <plugin>
@@ -244,11 +315,20 @@
                                         <!-- Spring 관련 클래스 모두 제외 -->
                                         <exclude>org/springframework/**</exclude>
                                         <exclude>org/springframework/boot/**</exclude>
-                                        <!-- Servlet 관련 클래스 제외 -->
+                                        <!-- Spring 관련 리소스 파일 제외 (충돌 방지) -->
+                                        <exclude>META-INF/spring.factories</exclude>
+                                        <exclude>META-INF/spring.handlers</exclude>
+                                        <exclude>META-INF/spring.schemas</exclude>
+                                        <exclude>META-INF/spring.tooling</exclude>
+                                        <exclude>META-INF/spring-configuration-metadata.json</exclude>
+                                        <exclude>META-INF/additional-spring-configuration-metadata.json</exclude>
+                                        <!-- Servlet 관련 클래스 제외 (Java 버전별로 다름) -->
                                         <exclude>jakarta/servlet/**</exclude>
                                         <exclude>javax/servlet/**</exclude>
                                         <!-- Logback 구현체 제외 -->
                                         <exclude>ch/qos/logback/**</exclude>
+                                        <!-- SLF4J API 제외 (앱에서 제공하는 버전 사용) -->
+                                        <exclude>org/slf4j/**</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
