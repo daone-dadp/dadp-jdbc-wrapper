@@ -53,7 +53,7 @@ public class MappingSyncService {
     public boolean checkMappingChange() {
         try {
             String checkUrl = hubUrl + "/hub/api/v1/proxy/mappings/check?proxyInstanceId=" + proxyInstanceId;
-            log.debug("🔗 Hub 매핑 변경 확인 URL: {}", checkUrl);
+            log.trace("🔗 Hub 매핑 변경 확인 URL: {}", checkUrl);
             
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(checkUrl))
@@ -88,7 +88,7 @@ public class MappingSyncService {
             log.trace("🔄 Hub에서 정책 매핑 정보 로드 시작: proxyInstanceId={}", proxyInstanceId);
             
             String mappingsUrl = hubUrl + "/hub/api/v1/proxy/mappings?proxyInstanceId=" + proxyInstanceId;
-            log.debug("🔗 Hub 매핑 조회 URL: {}", mappingsUrl);
+            log.trace("🔗 Hub 매핑 조회 URL: {}", mappingsUrl);
             
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(mappingsUrl))

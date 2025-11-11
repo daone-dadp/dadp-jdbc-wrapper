@@ -247,7 +247,6 @@ public class DadpProxyConnection implements Connection {
     @Override
     public PreparedStatement prepareStatement(String sql) throws SQLException {
         log.debug("🔍 PreparedStatement 생성: {}", sql);
-        // TODO: PreparedStatement 래핑하여 암복호화 처리
         PreparedStatement actualPs = actualConnection.prepareStatement(sql);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }

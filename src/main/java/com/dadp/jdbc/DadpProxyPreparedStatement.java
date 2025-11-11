@@ -69,8 +69,11 @@ public class DadpProxyPreparedStatement implements PreparedStatement {
             if (parseResult.getColumns() != null) {
                 String[] columns = parseResult.getColumns();
                 for (int i = 0; i < columns.length; i++) {
-                    // 파라미터 인덱스는 1부터 시작
-                    mapping.put(i + 1, columns[i]);
+                    // null이 아닌 컬럼명만 매핑
+                    if (columns[i] != null && !columns[i].trim().isEmpty()) {
+                        // 파라미터 인덱스는 1부터 시작
+                        mapping.put(i + 1, columns[i].trim());
+                    }
                 }
             }
         }

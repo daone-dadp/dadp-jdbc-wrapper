@@ -25,9 +25,10 @@ public class SqlParser {
     );
     
     // UPDATE 문 패턴: UPDATE table SET col1 = ?, col2 = ? WHERE ...
+    // WHERE 키워드 전까지 매칭 (대소문자 구분 없음)
     private static final Pattern UPDATE_PATTERN = Pattern.compile(
-        "UPDATE\\s+(\\w+)\\s+SET\\s+([^WHERE]+)",
-        Pattern.CASE_INSENSITIVE
+        "UPDATE\\s+(\\w+)\\s+SET\\s+(.+?)(?:\\s+WHERE|$)",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
     
     // SELECT 문 패턴: SELECT col1, col2, ... FROM table [alias]
@@ -143,15 +144,39 @@ public class SqlParser {
             result.setTableName(matcher.group(1));
             
             // SET 절의 컬럼 목록 추출
-            String setClause = matcher.group(2);
-            String[] assignments = setClause.split(",");
-            String[] columns = new String[assignments.length];
-            for (int i = 0; i < assignments.length; i++) {
-                String assignment = assignments[i].trim();
-                // col = ? 형식에서 컬럼명 추출
+            String setClause = matcher.group(2).trim();
+            // 콤마로 분리 (단, 괄호 안의 콤마는 제외)
+            java.util.List<String> assignments = new java.util.ArrayList<>();
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < setClause.length(); i++) {
+                char c = setClause.charAt(i);
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                else if (c == ',' && depth == 0) {
+                    assignments.add(setClause.substring(start, i).trim());
+                    start = i + 1;
+                }
+            }
+            if (start < setClause.length()) {
+                assignments.add(setClause.substring(start).trim());
+            }
+            
+            String[] columns = new String[assignments.size()];
+            for (int i = 0; i < assignments.size(); i++) {
+                String assignment = assignments.get(i);
+                // col = ? 또는 col=? 형식에서 컬럼명 추출
                 int equalsIndex = assignment.indexOf('=');
                 if (equalsIndex > 0) {
-                    columns[i] = assignment.substring(0, equalsIndex).trim();
+                    String columnName = assignment.substring(0, equalsIndex).trim();
+                    // 테이블 별칭 제거 (table.col -> col)
+                    int dotIndex = columnName.lastIndexOf('.');
+                    if (dotIndex > 0) {
+                        columnName = columnName.substring(dotIndex + 1);
+                    }
+                    columns[i] = columnName;
+                } else {
+                    columns[i] = null;
                 }
             }
             result.setColumns(columns);
