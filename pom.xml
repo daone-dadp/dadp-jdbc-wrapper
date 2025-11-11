@@ -7,7 +7,7 @@
 
     <groupId>io.github.daone-dadp</groupId>
     <artifactId>dadp-jdbc-wrapper</artifactId>
-    <version>3.0.2</version>
+    <version>3.0.3</version>
     <packaging>jar</packaging>
 
     <name>DADP JDBC Wrapper</name>
@@ -133,9 +133,9 @@
             
             <!-- Internal Dependencies -->
             <dependency>
-                <groupId>com.dadp</groupId>
+                <groupId>io.github.daone-dadp</groupId>
                 <artifactId>dadp-hub-crypto-lib</artifactId>
-                <version>1.0.0</version>
+                <version>1.0.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -143,9 +143,9 @@
     <dependencies>
         <!-- Hub 암복호화 라이브러리 (필수) - Java 버전별 classifier 사용 -->
         <dependency>
-            <groupId>com.dadp</groupId>
+            <groupId>io.github.daone-dadp</groupId>
             <artifactId>dadp-hub-crypto-lib</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
             <classifier>${classifier}</classifier>
         </dependency>
         
@@ -191,7 +191,6 @@
                 <artifactId>maven-gpg-plugin</artifactId>
                 <version>3.0.1</version>
                 <configuration>
-                    <gpgExecutable>C:\Program Files\Git\usr\bin\gpg.exe</gpgExecutable>
                     <useAgent>false</useAgent>
                     <passphrase>${env.GPG_PASSPHRASE}</passphrase>
                     <skip>false</skip>
