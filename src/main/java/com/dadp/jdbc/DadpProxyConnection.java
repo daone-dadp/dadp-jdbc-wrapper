@@ -1,8 +1,10 @@
 package com.dadp.jdbc;
 
+import com.dadp.hub.crypto.HubCryptoService;
 import com.dadp.jdbc.config.ProxyConfig;
 import com.dadp.jdbc.crypto.HubCryptoAdapter;
 import com.dadp.jdbc.mapping.MappingSyncService;
+import com.dadp.jdbc.notification.HubNotificationService;
 import com.dadp.jdbc.policy.PolicyResolver;
 import com.dadp.jdbc.schema.SchemaSyncService;
 import java.sql.*;
@@ -37,6 +39,7 @@ public class DadpProxyConnection implements Connection {
     private final SchemaSyncService schemaSyncService;
     private final MappingSyncService mappingSyncService;
     private final PolicyResolver policyResolver;
+    private final HubNotificationService notificationService;
     private boolean closed = false;
     
     // Proxy Instance별 스키마 동기화/매핑 로드 여부 (static으로 공유하여 중복 방지)
@@ -57,8 +60,10 @@ public class DadpProxyConnection implements Connection {
         this.config = urlParams != null ? new ProxyConfig(urlParams) : ProxyConfig.getInstance();
         
         // Hub 암복호화 어댑터 초기화 (지연 초기화 또는 Fail-open 모드)
+        HubCryptoService hubCryptoService = null;
         try {
-            this.hubCryptoAdapter = new HubCryptoAdapter(config.getHubUrl(), config.isFailOpen());
+            hubCryptoService = HubCryptoService.createInstance(config.getHubUrl(), 5000, true);
+            this.hubCryptoAdapter = new HubCryptoAdapter(config.getHubUrl(), config.isFailOpen(), null);
             log.info("✅ Hub 암복호화 어댑터 초기화 완료: hubUrl={}, failOpen={}", config.getHubUrl(), config.isFailOpen());
         } catch (Exception e) {
             log.error("❌ Hub 암복호화 어댑터 초기화 실패: {}", e.getMessage());
@@ -80,6 +85,25 @@ public class DadpProxyConnection implements Connection {
         
         // 매핑 동기화 서비스 초기화
         this.mappingSyncService = new MappingSyncService(config.getHubUrl(), config.getInstanceId(), policyResolver);
+        
+        // Hub 알림 서비스 초기화 (HubCryptoService를 통합 컴포넌트로 사용)
+        if (hubCryptoService != null) {
+            this.notificationService = new HubNotificationService(hubCryptoService, config.getInstanceId());
+            // 어댑터에 알림 서비스 설정
+            if (this.hubCryptoAdapter != null) {
+                // HubCryptoAdapter에 알림 서비스 설정 (리플렉션 사용)
+                try {
+                    java.lang.reflect.Field field = HubCryptoAdapter.class.getDeclaredField("notificationService");
+                    field.setAccessible(true);
+                    field.set(this.hubCryptoAdapter, this.notificationService);
+                } catch (Exception e) {
+                    log.warn("⚠️ HubCryptoAdapter에 알림 서비스 설정 실패: {}", e.getMessage());
+                }
+            }
+        } else {
+            this.notificationService = null;
+            log.warn("⚠️ HubCryptoService가 초기화되지 않아 알림 서비스를 생성할 수 없습니다");
+        }
         
         // Connection 생성 시 스키마 메타데이터 수집 및 Hub로 전송 (비동기)
         syncSchemaMetadata();
@@ -226,13 +250,17 @@ public class DadpProxyConnection implements Connection {
         // 지연 초기화: 아직 초기화되지 않았으면 재시도
         if (hubCryptoAdapter == null && config.isFailOpen()) {
             try {
-                this.hubCryptoAdapter = new HubCryptoAdapter(config.getHubUrl(), config.isFailOpen());
+                this.hubCryptoAdapter = new HubCryptoAdapter(config.getHubUrl(), config.isFailOpen(), notificationService);
                 log.info("✅ Hub 암복호화 어댑터 지연 초기화 완료: hubUrl={}", config.getHubUrl());
             } catch (Exception e) {
                 log.warn("⚠️ Hub 암복호화 어댑터 지연 초기화 실패 (무시): {}", e.getMessage());
             }
         }
         return hubCryptoAdapter;
+    }
+    
+    public HubNotificationService getNotificationService() {
+        return notificationService;
     }
     
     public ProxyConfig getConfig() {

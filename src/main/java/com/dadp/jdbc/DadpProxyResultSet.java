@@ -179,7 +179,9 @@ public class DadpProxyResultSet implements ResultSet {
                     }
                 }
             } catch (Exception e) {
-                log.warn("⚠️ 복호화 처리 중 오류, 원본 데이터 반환: {}", e.getMessage());
+                // 복호화 처리 중 오류 발생 시 경고 레벨로 간략하게 출력하고 평문 반환
+                String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                log.warn("⚠️ 복호화 처리 중 오류, 평문 반환: {}", errorMsg);
             }
         } else if (value != null && sqlParseResult == null) {
             log.warn("⚠️ SQL 파싱 결과 없음: 복호화 대상 확인 불가, columnLabel={}", columnLabel);

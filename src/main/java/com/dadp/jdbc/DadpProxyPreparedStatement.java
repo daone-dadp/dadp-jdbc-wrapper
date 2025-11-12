@@ -1,6 +1,7 @@
 package com.dadp.jdbc;
 
 import com.dadp.jdbc.crypto.HubCryptoAdapter;
+import com.dadp.jdbc.notification.HubNotificationService;
 import com.dadp.jdbc.policy.PolicyResolver;
 import com.dadp.jdbc.policy.SqlParser;
 import java.io.InputStream;
@@ -32,6 +33,7 @@ public class DadpProxyPreparedStatement implements PreparedStatement {
     private final DadpProxyConnection proxyConnection;
     private final SqlParser.SqlParseResult sqlParseResult;
     private final Map<Integer, String> parameterToColumnMap; // parameterIndex -> columnName
+    private final Map<Integer, String> originalDataMap; // parameterIndex -> original plaintext data (for fail-open on truncation)
     
     public DadpProxyPreparedStatement(PreparedStatement actualPs, String sql, DadpProxyConnection proxyConnection) {
         this.actualPreparedStatement = actualPs;
@@ -44,6 +46,9 @@ public class DadpProxyPreparedStatement implements PreparedStatement {
         
         // 파라미터 인덱스와 컬럼명 매핑 생성
         this.parameterToColumnMap = buildParameterMapping(sqlParseResult);
+        
+        // 원본 데이터 저장용 맵 초기화 (Data truncation 시 평문으로 재시도)
+        this.originalDataMap = new HashMap<>();
         
             if (sqlParseResult != null && !parameterToColumnMap.isEmpty()) {
                 log.trace("🔍 DADP Proxy PreparedStatement 생성: {} ({}개 파라미터 매핑)", sql, parameterToColumnMap.size());
@@ -158,8 +163,67 @@ public class DadpProxyPreparedStatement implements PreparedStatement {
     
     @Override
     public int executeUpdate() throws SQLException {
-        // TODO: 실행 전 SQL 파싱 및 암호화 처리
-        return actualPreparedStatement.executeUpdate();
+        try {
+            return actualPreparedStatement.executeUpdate();
+        } catch (SQLException e) {
+            // Data truncation 에러 감지 (암호화된 데이터가 컬럼 크기 초과)
+            if (e.getErrorCode() == 1406 || 
+                (e.getMessage() != null && e.getMessage().contains("Data too long"))) {
+                
+                // 원본 데이터가 저장된 파라미터가 있는지 확인
+                if (originalDataMap.isEmpty()) {
+                    // 원본 데이터가 없으면 원래 예외 발생
+                    log.warn("⚠️ Data truncation 에러 발생했으나 원본 데이터가 없어 재시도 불가: {}", e.getMessage());
+                    throw e;
+                }
+                
+                String tableName = sqlParseResult != null ? sqlParseResult.getTableName() : null;
+                
+                // 모든 암호화된 파라미터를 원본 데이터로 되돌리기
+                int restoredCount = 0;
+                for (Map.Entry<Integer, String> entry : originalDataMap.entrySet()) {
+                    Integer paramIndex = entry.getKey();
+                    String originalData = entry.getValue();
+                    
+                    // 원본 데이터로 재설정
+                    actualPreparedStatement.setString(paramIndex, originalData);
+                    restoredCount++;
+                    
+                    // 해당 파라미터의 컬럼명 찾기
+                    String paramColumnName = parameterToColumnMap.get(paramIndex);
+                    if (paramColumnName != null) {
+                        String policyName = proxyConnection.getPolicyResolver().resolvePolicy(tableName, paramColumnName);
+                        String errorMsg = "암호화된 데이터가 컬럼 크기를 초과합니다 (원본: " + 
+                                         (originalData != null ? originalData.length() : 0) + "자)";
+                        log.warn("⚠️ 암호화 데이터 크기 초과: {}.{} (정책: {}), 평문으로 재시도 - {}", 
+                                 tableName, paramColumnName, policyName, errorMsg);
+                        
+                        // Hub에 알림 전송 (Hub 연결이 확인된 경우에만)
+                        HubNotificationService notificationService = proxyConnection.getNotificationService();
+                        HubCryptoAdapter adapter = proxyConnection.getHubCryptoAdapter();
+                        if (notificationService != null && adapter != null && adapter.isHubAvailable()) {
+                            notificationService.notifyEncryptionError(tableName, paramColumnName, policyName, errorMsg);
+                        }
+                    } else {
+                        log.warn("⚠️ 암호화 데이터 크기 초과: parameterIndex={}, 평문으로 재시도", paramIndex);
+                    }
+                }
+                
+                log.info("🔄 Data truncation 발생: {}개 파라미터를 평문으로 되돌려 재시도", restoredCount);
+                
+                // 평문으로 재시도
+                try {
+                    return actualPreparedStatement.executeUpdate();
+                } catch (SQLException retryException) {
+                    // 재시도에서도 실패하면 원래 예외 발생
+                    log.error("❌ 평문으로 재시도했으나 여전히 실패: {}", retryException.getMessage());
+                    throw e; // 원래 예외 발생
+                }
+            } else {
+                // 다른 SQLException은 그대로 발생
+                throw e;
+            }
+        }
     }
     
     @Override
@@ -237,14 +301,30 @@ public class DadpProxyPreparedStatement implements PreparedStatement {
                     if (adapter != null) {
                         try {
                             String encrypted = adapter.encrypt(x, policyName);
+                            
+                            // 원본 데이터 저장 (Data truncation 시 평문으로 재시도하기 위해)
+                            originalDataMap.put(parameterIndex, x);
+                            
+                            // 암호화된 데이터 설정 (MySQL은 executeUpdate 시점에 검증하므로 여기서는 에러가 발생하지 않음)
                             actualPreparedStatement.setString(parameterIndex, encrypted);
                             log.debug("🔐 암호화 완료: {}.{} → {} (정책: {})", tableName, columnName, 
                                      encrypted != null && encrypted.length() > 20 ? encrypted.substring(0, 20) + "..." : encrypted, 
                                      policyName);
                             return;
                         } catch (Exception e) {
-                            log.error("❌ 암호화 실패: {}.{} (정책: {}), 원본 데이터로 저장", 
-                                     tableName, columnName, policyName);
+                            // 암호화 실패 시 경고 레벨로 간략하게 출력하고 평문으로 저장
+                            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                            log.warn("⚠️ 암호화 실패: {}.{} (정책: {}), 평문으로 저장 - {}", 
+                                     tableName, columnName, policyName, errorMsg);
+                            
+                            // Hub에 알림 전송 (Hub 연결이 확인된 경우에만)
+                            HubNotificationService notificationService = proxyConnection.getNotificationService();
+                            if (notificationService != null && adapter.isHubAvailable()) {
+                                notificationService.notifyEncryptionError(tableName, columnName, policyName, errorMsg);
+                            } else if (notificationService != null && !adapter.isHubAvailable()) {
+                                log.debug("Hub 연결이 확인되지 않아 알림 전송 건너뜀");
+                            }
+                            
                             // 암호화 실패 시 원본 데이터로 저장 (Fail-open)
                         }
                     } else {

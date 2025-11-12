@@ -117,6 +117,8 @@ java -Dloader.path=libs -jar app.jar
 
 ## 📚 문서
 
+- **[CHANGELOG](CHANGELOG.md)** - 버전별 변경사항 (최신: v3.0.5)
+- **[Release Notes v3.0.4](RELEASE_NOTES_v3.0.4.md)** - v3.0.4 상세 릴리즈 노트
 - **[사용 가이드](docs/USER_GUIDE.md)** - 고객사용 통합 가이드 (예정)
 
 ## 🔗 링크
