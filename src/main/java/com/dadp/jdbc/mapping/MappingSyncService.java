@@ -3,10 +3,11 @@ package com.dadp.jdbc.mapping;
 import com.dadp.jdbc.policy.PolicyResolver;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,16 +30,16 @@ public class MappingSyncService {
     
     private final String hubUrl;
     private final String proxyInstanceId;
-    private final int connectTimeout;
-    private final int readTimeout;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final PolicyResolver policyResolver;
     
     public MappingSyncService(String hubUrl, String proxyInstanceId, PolicyResolver policyResolver) {
         this.hubUrl = hubUrl;
         this.proxyInstanceId = proxyInstanceId;
-        this.connectTimeout = 5000; // 5초
-        this.readTimeout = 10000; // 10초
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.policyResolver = policyResolver;
@@ -54,35 +55,22 @@ public class MappingSyncService {
             String checkUrl = hubUrl + "/hub/api/v1/proxy/mappings/check?proxyInstanceId=" + proxyInstanceId;
             log.trace("🔗 Hub 매핑 변경 확인 URL: {}", checkUrl);
             
-            // HttpURLConnection 사용 (Java 8 호환)
-            URL url = new URL(checkUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setConnectTimeout(connectTimeout);
-            conn.setReadTimeout(readTimeout);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(checkUrl))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(5))
+                    .GET()
+                    .build();
             
-            int statusCode = conn.getResponseCode();
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             
-            if (statusCode >= 200 && statusCode < 300) {
-                // 응답 읽기
-                StringBuilder responseBody = new StringBuilder();
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBody.append(line);
-                    }
-                }
-                
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 // ApiResponse<Boolean> 형태로 파싱
-                CheckMappingChangeResponse checkResponse = objectMapper.readValue(responseBody.toString(), CheckMappingChangeResponse.class);
+                CheckMappingChangeResponse checkResponse = objectMapper.readValue(response.body(), CheckMappingChangeResponse.class);
                 if (checkResponse != null && checkResponse.isSuccess() && checkResponse.getData() != null) {
-                    conn.disconnect();
                     return checkResponse.getData();
                 }
             }
-            conn.disconnect();
             return false;
         } catch (Exception e) {
             log.warn("⚠️ 매핑 변경 확인 실패: {}", e.getMessage());
@@ -102,28 +90,17 @@ public class MappingSyncService {
             String mappingsUrl = hubUrl + "/hub/api/v1/proxy/mappings?proxyInstanceId=" + proxyInstanceId;
             log.trace("🔗 Hub 매핑 조회 URL: {}", mappingsUrl);
             
-            // HttpURLConnection 사용 (Java 8 호환)
-            URL url = new URL(mappingsUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setConnectTimeout(connectTimeout);
-            conn.setReadTimeout(readTimeout);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(mappingsUrl))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
             
-            int statusCode = conn.getResponseCode();
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             
-            if (statusCode >= 200 && statusCode < 300) {
-                // 응답 읽기
-                StringBuilder responseBody = new StringBuilder();
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBody.append(line);
-                    }
-                }
-                
-                MappingListResponse mappingResponse = objectMapper.readValue(responseBody.toString(), MappingListResponse.class);
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                MappingListResponse mappingResponse = objectMapper.readValue(response.body(), MappingListResponse.class);
                 
                 if (mappingResponse != null && mappingResponse.isSuccess() && mappingResponse.getData() != null) {
                     List<EncryptionMapping> mappings = mappingResponse.getData();
@@ -143,16 +120,13 @@ public class MappingSyncService {
                     policyResolver.refreshMappings(policyMap);
                     
                     log.trace("✅ Hub에서 정책 매핑 정보 로드 완료: {}개 매핑", policyMap.size());
-                    conn.disconnect();
                     return policyMap.size();
                 } else {
                     log.warn("⚠️ Hub에서 정책 매핑 정보 로드 실패: 응답 없음 또는 실패");
-                    conn.disconnect();
                     return 0;
                 }
             } else {
-                log.warn("⚠️ Hub에서 정책 매핑 정보 로드 실패: HTTP {}", statusCode);
-                conn.disconnect();
+                log.warn("⚠️ Hub에서 정책 매핑 정보 로드 실패: HTTP {}", response.statusCode());
                 return 0;
             }
             

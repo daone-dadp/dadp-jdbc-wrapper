@@ -3,13 +3,13 @@ package com.dadp.jdbc.schema;
 import com.dadp.jdbc.policy.SchemaRecognizer;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.MessageDigest;
 import java.sql.Connection;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -31,8 +31,7 @@ public class SchemaSyncService {
     
     private final String hubUrl;
     private final String proxyInstanceId;
-    private final int connectTimeout;
-    private final int readTimeout;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final SchemaRecognizer schemaRecognizer;
     
@@ -42,8 +41,9 @@ public class SchemaSyncService {
     public SchemaSyncService(String hubUrl, String proxyInstanceId) {
         this.hubUrl = hubUrl;
         this.proxyInstanceId = proxyInstanceId;
-        this.connectTimeout = 5000; // 5초
-        this.readTimeout = 10000; // 10초
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.schemaRecognizer = new SchemaRecognizer();
@@ -86,35 +86,17 @@ public class SchemaSyncService {
             
             String requestBody = objectMapper.writeValueAsString(request);
             
-            // HttpURLConnection 사용 (Java 8 호환)
-            URL url = new URL(syncUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setConnectTimeout(connectTimeout);
-            conn.setReadTimeout(readTimeout);
-            conn.setDoOutput(true);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(syncUrl))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
             
-            // 요청 본문 전송
-            try (OutputStreamWriter writer = new OutputStreamWriter(conn.getOutputStream(), "UTF-8")) {
-                writer.write(requestBody);
-                writer.flush();
-            }
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             
-            int statusCode = conn.getResponseCode();
-            
-            if (statusCode >= 200 && statusCode < 300) {
-                // 응답 읽기
-                StringBuilder responseBody = new StringBuilder();
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBody.append(line);
-                    }
-                }
-                
-                SchemaSyncResponse syncResponse = objectMapper.readValue(responseBody.toString(), SchemaSyncResponse.class);
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                SchemaSyncResponse syncResponse = objectMapper.readValue(response.body(), SchemaSyncResponse.class);
                 if (syncResponse != null && syncResponse.isSuccess()) {
                     // 동기화 성공 시 해시 저장
                     lastSchemaHash.put(proxyInstanceId, currentHash);
@@ -124,10 +106,8 @@ public class SchemaSyncService {
                     log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: 응답 없음");
                 }
             } else {
-                log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: HTTP {}", statusCode);
+                log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: HTTP {}", response.statusCode());
             }
-            
-            conn.disconnect();
             
         } catch (Exception e) {
             log.error("❌ Hub로 스키마 메타데이터 동기화 실패: {}", e.getMessage());
