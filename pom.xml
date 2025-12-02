@@ -50,30 +50,48 @@
     </distributionManagement>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <!-- 기본값을 Java 8로 설정하여 모든 Java 버전(8, 11, 17)에서 사용 가능 -->
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>2.7.18</spring-boot.version>
         <jackson.version>2.13.5</jackson.version>
         <slf4j.version>1.7.36</slf4j.version>
         <junit.version>5.9.3</junit.version>
-        <java.version>17</java.version>
+        <java.version>8</java.version>
         <classifier></classifier>
     </properties>
 
     <profiles>
-        <!-- Java 8 프로파일 -->
+        <!-- Java 8 프로파일 (기본) - 하나의 JAR로 모든 Java 버전 지원 -->
         <profile>
             <id>java8</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
             <properties>
                 <maven.compiler.source>1.8</maven.compiler.source>
                 <maven.compiler.target>1.8</maven.compiler.target>
                 <java.version>8</java.version>
+                <!-- classifier를 빈 문자열로 설정하면 기본 JAR를 대체하려고 해서 오류 발생, 빈 문자열이 아닌 값 사용 -->
                 <classifier>java8</classifier>
             </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/Java11HttpClientAdapter.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
 
-        <!-- Java 11 프로파일 -->
+        <!-- Java 11 프로파일 (사용 안 함, Java 8로 빌드하면 11에서도 동작) -->
         <profile>
             <id>java11</id>
             <properties>
@@ -84,12 +102,9 @@
             </properties>
         </profile>
 
-        <!-- Java 17 프로파일 (기본) -->
+        <!-- Java 17 프로파일 (사용 안 함, Java 8로 빌드하면 17에서도 동작) -->
         <profile>
             <id>java17</id>
-            <activation>
-                <activeByDefault>true</activeByDefault>
-            </activation>
             <properties>
                 <maven.compiler.source>17</maven.compiler.source>
                 <maven.compiler.target>17</maven.compiler.target>
@@ -227,6 +242,10 @@
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                     <encoding>UTF-8</encoding>
+                    <!-- Java 8 프로파일일 때 Java11HttpClientAdapter 제외 -->
+                    <excludes>
+                        <exclude>**/Java11HttpClientAdapter.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
 
@@ -244,7 +263,7 @@
                             <goal>jar</goal>
                         </goals>
                     </execution>
-                    <!-- Classifier가 있는 JAR 생성 (classifier가 있을 때만) -->
+                    <!-- Classifier가 있는 JAR 생성 (classifier가 비어있지 않을 때만) -->
                     <execution>
                         <id>classifier-jar</id>
                         <phase>package</phase>
@@ -253,7 +272,8 @@
                         </goals>
                         <configuration>
                             <classifier>${classifier}</classifier>
-                            <skipIfEmpty>true</skipIfEmpty>
+                            <!-- classifier가 빈 문자열이면 이 execution을 건너뜀 -->
+                            <skip>${classifier}</skip>
                         </configuration>
                     </execution>
                 </executions>

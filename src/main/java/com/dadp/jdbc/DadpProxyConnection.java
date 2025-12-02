@@ -11,6 +11,7 @@ import java.sql.*;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,6 +46,12 @@ public class DadpProxyConnection implements Connection {
     // Proxy Instance별 스키마 동기화/매핑 로드 여부 (static으로 공유하여 중복 방지)
     private static final ConcurrentHashMap<String, Boolean> schemaSyncedMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Boolean> mappingsLoadedMap = new ConcurrentHashMap<>();
+    
+    // Proxy Instance별 매핑 로드 완료 대기용 Latch (static으로 공유)
+    private static final ConcurrentHashMap<String, CountDownLatch> mappingsLoadedLatchMap = new ConcurrentHashMap<>();
+    
+    // 정책 로드 대기 타임아웃 (초)
+    private static final int POLICY_LOAD_TIMEOUT_SECONDS = 10;
     
     // Proxy Instance별 매핑 폴링 스케줄러 (static으로 공유하여 중복 방지)
     private static final ConcurrentHashMap<String, ScheduledExecutorService> mappingPollingSchedulers = new ConcurrentHashMap<>();
@@ -148,7 +155,7 @@ public class DadpProxyConnection implements Connection {
     }
     
     /**
-     * Hub에서 정책 매핑 정보를 로드 (비동기)
+     * Hub에서 정책 매핑 정보를 로드 (비동기, 완료 대기 가능)
      * Proxy Instance별로 한 번만 실행되고, 이후 주기적으로 폴링합니다.
      */
     private void loadMappingsFromHub() {
@@ -159,6 +166,9 @@ public class DadpProxyConnection implements Connection {
             return;
         }
         
+        // Latch 생성 (최초 한 번만)
+        mappingsLoadedLatchMap.putIfAbsent(instanceId, new CountDownLatch(1));
+        
         // 로드 시작 표시 (동시 실행 방지)
         if (mappingsLoadedMap.putIfAbsent(instanceId, true) != null) {
             return; // 다른 스레드가 이미 시작함
@@ -166,6 +176,7 @@ public class DadpProxyConnection implements Connection {
         
         // 첫 로드 실행
         new Thread(() -> {
+            CountDownLatch latch = mappingsLoadedLatchMap.get(instanceId);
             try {
                 Thread.sleep(1500); // 스키마 동기화 후 실행
                 int count = mappingSyncService.loadMappingsFromHub();
@@ -175,8 +186,39 @@ public class DadpProxyConnection implements Connection {
                 log.warn("⚠️ 정책 매핑 정보 로드 실패 (무시): {}", e.getMessage());
                 // 로드 실패 시 플래그 제거하여 재시도 가능하도록
                 mappingsLoadedMap.remove(instanceId);
+            } finally {
+                // 성공/실패 여부와 관계없이 Latch 해제 (대기 중인 스레드 풀어줌)
+                if (latch != null) {
+                    latch.countDown();
+                }
             }
         }, "dadp-proxy-mapping-load-" + instanceId).start();
+    }
+    
+    /**
+     * 정책 매핑 로드가 완료될 때까지 대기
+     * @return 정책 로드 완료 여부 (타임아웃 시 false)
+     */
+    private boolean waitForMappingsLoaded() {
+        String instanceId = config.getInstanceId();
+        CountDownLatch latch = mappingsLoadedLatchMap.get(instanceId);
+        
+        if (latch == null) {
+            // Latch가 없으면 이미 로드 완료됨
+            return true;
+        }
+        
+        try {
+            boolean completed = latch.await(POLICY_LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!completed) {
+                log.warn("⚠️ 정책 매핑 로드 대기 타임아웃 ({}초): instanceId={}", POLICY_LOAD_TIMEOUT_SECONDS, instanceId);
+            }
+            return completed;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("⚠️ 정책 매핑 로드 대기 중 인터럽트: {}", e.getMessage());
+            return false;
+        }
     }
     
     /**
@@ -269,14 +311,33 @@ public class DadpProxyConnection implements Connection {
     
     @Override
     public Statement createStatement() throws SQLException {
-        return actualConnection.createStatement();
+        ensureMappingsLoaded();
+        Statement actualStmt = actualConnection.createStatement();
+        return new DadpProxyStatement(actualStmt, this);
     }
     
     @Override
     public PreparedStatement prepareStatement(String sql) throws SQLException {
         log.debug("🔍 PreparedStatement 생성: {}", sql);
+        // 정책 매핑 로드 완료 대기 (첫 번째 쿼리 실행 전 정책 적용 보장)
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
+    }
+    
+    /**
+     * 정책 매핑 로드가 완료되었는지 확인하고, 필요시 대기
+     * 첫 번째 쿼리 실행 전 정책이 적용되도록 보장합니다.
+     */
+    private void ensureMappingsLoaded() {
+        String instanceId = config.getInstanceId();
+        CountDownLatch latch = mappingsLoadedLatchMap.get(instanceId);
+        
+        // Latch가 있고 아직 해제되지 않았으면 대기
+        if (latch != null && latch.getCount() > 0) {
+            log.debug("⏳ 정책 매핑 로드 완료 대기 중... instanceId={}", instanceId);
+            waitForMappingsLoaded();
+        }
     }
     
     @Override
@@ -371,11 +432,14 @@ public class DadpProxyConnection implements Connection {
     
     @Override
     public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
-        return actualConnection.createStatement(resultSetType, resultSetConcurrency);
+        ensureMappingsLoaded();
+        Statement actualStmt = actualConnection.createStatement(resultSetType, resultSetConcurrency);
+        return new DadpProxyStatement(actualStmt, this);
     }
     
     @Override
     public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency) throws SQLException {
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql, resultSetType, resultSetConcurrency);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }
@@ -427,11 +491,14 @@ public class DadpProxyConnection implements Connection {
     
     @Override
     public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
-        return actualConnection.createStatement(resultSetType, resultSetConcurrency, resultSetHoldability);
+        ensureMappingsLoaded();
+        Statement actualStmt = actualConnection.createStatement(resultSetType, resultSetConcurrency, resultSetHoldability);
+        return new DadpProxyStatement(actualStmt, this);
     }
     
     @Override
     public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql, resultSetType, resultSetConcurrency, resultSetHoldability);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }
@@ -443,18 +510,21 @@ public class DadpProxyConnection implements Connection {
     
     @Override
     public PreparedStatement prepareStatement(String sql, int autoGeneratedKeys) throws SQLException {
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql, autoGeneratedKeys);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }
     
     @Override
     public PreparedStatement prepareStatement(String sql, int[] columnIndexes) throws SQLException {
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql, columnIndexes);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }
     
     @Override
     public PreparedStatement prepareStatement(String sql, String[] columnNames) throws SQLException {
+        ensureMappingsLoaded();
         PreparedStatement actualPs = actualConnection.prepareStatement(sql, columnNames);
         return new DadpProxyPreparedStatement(actualPs, sql, this);
     }

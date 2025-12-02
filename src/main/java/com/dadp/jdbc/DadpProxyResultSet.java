@@ -40,7 +40,8 @@ public class DadpProxyResultSet implements ResultSet {
         SqlParser sqlParser = new SqlParser();
         this.sqlParseResult = sqlParser.parse(sql);
         
-        log.trace("🔍 DADP Proxy ResultSet 생성");
+        log.info("🔍 DADP Proxy ResultSet 생성: table={}", 
+                 sqlParseResult != null ? sqlParseResult.getTableName() : "null");
     }
     
     @Override
@@ -76,9 +77,10 @@ public class DadpProxyResultSet implements ResultSet {
     @Override
     public String getString(int columnIndex) throws SQLException {
         String value = actualResultSet.getString(columnIndex);
+        log.info("🔓 getString(int) 호출: columnIndex={}, valueLength={}", 
+                 columnIndex, value != null ? value.length() : 0);
         
         if (value == null) {
-            log.trace("🔓 getString 호출: columnIndex={}, value=null", columnIndex);
             return value;
         }
         
@@ -91,14 +93,32 @@ public class DadpProxyResultSet implements ResultSet {
             // ResultSetMetaData로 컬럼명 조회
             ResultSetMetaData metaData = actualResultSet.getMetaData();
             String columnName = metaData.getColumnName(columnIndex);
+            String columnLabel = metaData.getColumnLabel(columnIndex);
             String tableName = sqlParseResult.getTableName();
             
-            log.trace("🔓 복호화 확인: tableName={}, columnName={}, columnIndex={}", tableName, columnName, columnIndex);
+            log.debug("🔓 복호화 확인: tableName={}, columnName={}, columnLabel={}, columnIndex={}", 
+                     tableName, columnName, columnLabel, columnIndex);
             
             if (columnName != null && tableName != null) {
                 // 컬럼명에서 테이블 별칭 제거 (u1_0.email -> email)
                 if (columnName.contains(".")) {
                     columnName = columnName.substring(columnName.lastIndexOf('.') + 1);
+                }
+                
+                // Hibernate alias 매핑 확인 (email3_0_ → email)
+                // columnLabel이 alias인 경우 원본 컬럼명으로 변환
+                String originalColumnName = sqlParseResult.getOriginalColumnName(columnLabel);
+                if (!originalColumnName.equals(columnLabel)) {
+                    log.debug("🔓 alias 변환: {} → {}", columnLabel, originalColumnName);
+                    columnName = originalColumnName;
+                } else if (!columnName.equalsIgnoreCase(columnLabel)) {
+                    // columnName과 columnLabel이 다르면 alias일 수 있음
+                    // 추가로 columnName 기반으로도 매핑 시도
+                    String mappedName = sqlParseResult.getOriginalColumnName(columnName);
+                    if (!mappedName.equals(columnName)) {
+                        log.debug("🔓 alias 변환 (columnName): {} → {}", columnName, mappedName);
+                        columnName = mappedName;
+                    }
                 }
                 
                 // PolicyResolver에서 정책 확인 (메모리 캐시에서 조회)
@@ -125,10 +145,10 @@ public class DadpProxyResultSet implements ResultSet {
                         log.warn("⚠️ Hub 어댑터가 초기화되지 않았습니다: {}.{} (정책: {}), 원본 데이터 반환", 
                                 tableName, columnName, policyName);
                     }
-                    } else {
-                        log.trace("🔓 복호화 대상 아님: {}.{}", tableName, columnName);
-                    }
                 } else {
+                    log.trace("🔓 복호화 대상 아님: {}.{}", tableName, columnName);
+                }
+            } else {
                     log.warn("⚠️ 테이블명 또는 컬럼명 없음: 복호화 대상 확인 불가, tableName={}, columnName={}", tableName, columnName);
                 }
             } catch (SQLException e) {
@@ -142,12 +162,21 @@ public class DadpProxyResultSet implements ResultSet {
     @Override
     public String getString(String columnLabel) throws SQLException {
         String value = actualResultSet.getString(columnLabel);
+        log.info("🔓 getString(String) 호출: columnLabel={}, valueLength={}", 
+                 columnLabel, value != null ? value.length() : 0);
         
         if (value != null && sqlParseResult != null) {
             try {
-                // 컬럼 레이블을 컬럼명으로 사용
-                String columnName = columnLabel;
                 String tableName = sqlParseResult.getTableName();
+                
+                // Hibernate alias 매핑: email3_0_ → email
+                String originalColumnName = sqlParseResult.getOriginalColumnName(columnLabel);
+                String columnName = (originalColumnName != null && !originalColumnName.equals(columnLabel)) 
+                    ? originalColumnName : columnLabel;
+                
+                if (!columnName.equals(columnLabel)) {
+                    log.debug("🔓 alias 변환: {} → {}", columnLabel, columnName);
+                }
                 
                 if (tableName == null) {
                     log.warn("⚠️ 테이블명 없음: 복호화 대상 확인 불가, columnLabel={}", columnLabel);
@@ -346,14 +375,116 @@ public class DadpProxyResultSet implements ResultSet {
     @Override
     public Object getObject(int columnIndex) throws SQLException {
         Object value = actualResultSet.getObject(columnIndex);
-        // TODO: Object 타입인 경우 String으로 변환하여 복호화 처리
+        log.debug("🔍 getObject(int) 호출: columnIndex={}, type={}", columnIndex, 
+                  value != null ? value.getClass().getSimpleName() : "null");
+        
+        // String 타입인 경우 복호화 처리
+        if (value instanceof String) {
+            return decryptIfNeeded(columnIndex, (String) value);
+        }
         return value;
     }
     
     @Override
     public Object getObject(String columnLabel) throws SQLException {
         Object value = actualResultSet.getObject(columnLabel);
-        // TODO: Object 타입인 경우 String으로 변환하여 복호화 처리
+        log.debug("🔍 getObject(String) 호출: columnLabel={}, type={}", columnLabel,
+                  value != null ? value.getClass().getSimpleName() : "null");
+        
+        // String 타입인 경우 복호화 처리
+        if (value instanceof String) {
+            return decryptStringByLabel(columnLabel, (String) value);
+        }
+        return value;
+    }
+    
+    /**
+     * 컬럼 인덱스로 복호화 처리
+     */
+    private String decryptIfNeeded(int columnIndex, String value) throws SQLException {
+        log.debug("🔓 decryptIfNeeded 호출: columnIndex={}, valueLength={}", 
+                  columnIndex, value != null ? value.length() : 0);
+        
+        if (value == null || sqlParseResult == null) {
+            log.debug("🔓 decryptIfNeeded 스킵: value={}, sqlParseResult={}", 
+                      value == null ? "null" : "exists", sqlParseResult == null ? "null" : "exists");
+            return value;
+        }
+        
+        try {
+            ResultSetMetaData metaData = actualResultSet.getMetaData();
+            String columnName = metaData.getColumnName(columnIndex);
+            String tableName = sqlParseResult.getTableName();
+            
+            log.debug("🔓 decryptIfNeeded: tableName={}, columnName={}", tableName, columnName);
+            return decryptValue(tableName, columnName, value);
+        } catch (SQLException e) {
+            log.warn("⚠️ 컬럼 메타데이터 조회 실패, 원본 데이터 반환: {}", e.getMessage());
+            return value;
+        }
+    }
+    
+    /**
+     * 컬럼 레이블로 복호화 처리
+     */
+    private String decryptStringByLabel(String columnLabel, String value) {
+        if (value == null || sqlParseResult == null) {
+            return value;
+        }
+        
+        String tableName = sqlParseResult.getTableName();
+        
+        // Hibernate alias 매핑: email3_0_ → email
+        String originalColumnName = sqlParseResult.getOriginalColumnName(columnLabel);
+        String columnName = (originalColumnName != null && !originalColumnName.equals(columnLabel)) 
+            ? originalColumnName : columnLabel;
+        
+        if (!columnName.equals(columnLabel)) {
+            log.debug("🔓 alias 변환 (byLabel): {} → {}", columnLabel, columnName);
+        }
+        
+        return decryptValue(tableName, columnName, value);
+    }
+    
+    /**
+     * 실제 복호화 수행
+     */
+    private String decryptValue(String tableName, String columnName, String value) {
+        if (tableName == null || columnName == null) {
+            log.debug("🔓 복호화 스킵: tableName={}, columnName={} (null 값)", tableName, columnName);
+            return value;
+        }
+        
+        // 컬럼명에서 테이블 별칭 제거
+        if (columnName.contains(".")) {
+            columnName = columnName.substring(columnName.lastIndexOf('.') + 1);
+        }
+        
+        // PolicyResolver에서 정책 확인
+        PolicyResolver policyResolver = proxyConnection.getPolicyResolver();
+        log.debug("🔍 복호화 정책 조회: {}.{}", tableName, columnName);
+        String policyName = policyResolver.resolvePolicy(tableName, columnName);
+        
+        if (policyName != null) {
+            log.debug("🔓 복호화 대상: {}.{}, 정책={}", tableName, columnName, policyName);
+            HubCryptoAdapter adapter = proxyConnection.getHubCryptoAdapter();
+            if (adapter != null) {
+                String decrypted = adapter.decrypt(value);
+                if (decrypted != null) {
+                    log.info("🔓 복호화 완료: {}.{} → {} (정책: {})", tableName, columnName, 
+                             decrypted.length() > 20 ? decrypted.substring(0, 20) + "..." : decrypted, 
+                             policyName);
+                    return decrypted;
+                } else {
+                    log.debug("🔓 복호화 결과 null (암호화되지 않은 데이터일 수 있음): {}.{}", tableName, columnName);
+                }
+            } else {
+                log.warn("⚠️ Hub 어댑터가 초기화되지 않았습니다: {}.{}", tableName, columnName);
+            }
+        } else {
+            log.debug("🔓 복호화 정책 없음: {}.{} (정책 매핑에 등록되지 않음)", tableName, columnName);
+        }
+        
         return value;
     }
     
@@ -1094,12 +1225,26 @@ public class DadpProxyResultSet implements ResultSet {
     }
     
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T getObject(int columnIndex, Class<T> type) throws SQLException {
+        log.info("🔓 getObject(int, Class) 호출: columnIndex={}, type={}", columnIndex, type.getSimpleName());
+        // String 타입인 경우 복호화 처리
+        if (type == String.class) {
+            String value = actualResultSet.getString(columnIndex);
+            return (T) decryptIfNeeded(columnIndex, value);
+        }
         return actualResultSet.getObject(columnIndex, type);
     }
     
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T getObject(String columnLabel, Class<T> type) throws SQLException {
+        log.info("🔓 getObject(String, Class) 호출: columnLabel={}, type={}", columnLabel, type.getSimpleName());
+        // String 타입인 경우 복호화 처리
+        if (type == String.class) {
+            String value = actualResultSet.getString(columnLabel);
+            return (T) decryptStringByLabel(columnLabel, value);
+        }
         return actualResultSet.getObject(columnLabel, type);
     }
     

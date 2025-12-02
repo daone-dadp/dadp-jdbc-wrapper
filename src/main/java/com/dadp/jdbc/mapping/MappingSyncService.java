@@ -1,13 +1,11 @@
 package com.dadp.jdbc.mapping;
 
+import com.dadp.jdbc.http.HttpClientAdapter;
 import com.dadp.jdbc.policy.PolicyResolver;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,10 +16,10 @@ import org.slf4j.LoggerFactory;
  * 매핑 동기화 서비스
  * 
  * Proxy에서 Hub로부터 정책 매핑 정보를 가져와서 PolicyResolver에 저장합니다.
- * JDK 내장 HttpClient를 사용하여 Spring 의존성 없이 동작합니다.
+ * Java 버전에 따라 적절한 HTTP 클라이언트를 자동으로 선택합니다.
  * 
  * @author DADP Development Team
- * @version 3.0.0
+ * @version 3.0.5
  * @since 2025-11-07
  */
 public class MappingSyncService {
@@ -30,16 +28,15 @@ public class MappingSyncService {
     
     private final String hubUrl;
     private final String proxyInstanceId;
-    private final HttpClient httpClient;
+    private final HttpClientAdapter httpClient;
     private final ObjectMapper objectMapper;
     private final PolicyResolver policyResolver;
     
     public MappingSyncService(String hubUrl, String proxyInstanceId, PolicyResolver policyResolver) {
         this.hubUrl = hubUrl;
         this.proxyInstanceId = proxyInstanceId;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        // Java 버전에 따라 적절한 HTTP 클라이언트 자동 선택
+        this.httpClient = HttpClientAdapter.Factory.create(5000, 10000);
         this.objectMapper = new ObjectMapper();
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.policyResolver = policyResolver;
@@ -55,24 +52,22 @@ public class MappingSyncService {
             String checkUrl = hubUrl + "/hub/api/v1/proxy/mappings/check?proxyInstanceId=" + proxyInstanceId;
             log.trace("🔗 Hub 매핑 변경 확인 URL: {}", checkUrl);
             
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(checkUrl))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(5))
-                    .GET()
-                    .build();
+            // Java 버전에 따라 적절한 HTTP 클라이언트 사용
+            URI uri = URI.create(checkUrl);
+            HttpClientAdapter.HttpResponse response = httpClient.get(uri);
             
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            int statusCode = response.getStatusCode();
+            String responseBody = response.getBody();
             
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            if (statusCode >= 200 && statusCode < 300 && responseBody != null) {
                 // ApiResponse<Boolean> 형태로 파싱
-                CheckMappingChangeResponse checkResponse = objectMapper.readValue(response.body(), CheckMappingChangeResponse.class);
+                CheckMappingChangeResponse checkResponse = objectMapper.readValue(responseBody, CheckMappingChangeResponse.class);
                 if (checkResponse != null && checkResponse.isSuccess() && checkResponse.getData() != null) {
                     return checkResponse.getData();
                 }
             }
             return false;
-        } catch (Exception e) {
+        } catch (IOException e) {
             log.warn("⚠️ 매핑 변경 확인 실패: {}", e.getMessage());
             return false; // 실패 시 false 반환 (다음 확인 시 재시도)
         }
@@ -90,17 +85,15 @@ public class MappingSyncService {
             String mappingsUrl = hubUrl + "/hub/api/v1/proxy/mappings?proxyInstanceId=" + proxyInstanceId;
             log.trace("🔗 Hub 매핑 조회 URL: {}", mappingsUrl);
             
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(mappingsUrl))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
+            // Java 버전에 따라 적절한 HTTP 클라이언트 사용
+            URI uri = URI.create(mappingsUrl);
+            HttpClientAdapter.HttpResponse response = httpClient.get(uri);
             
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            int statusCode = response.getStatusCode();
+            String responseBody = response.getBody();
             
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                MappingListResponse mappingResponse = objectMapper.readValue(response.body(), MappingListResponse.class);
+            if (statusCode >= 200 && statusCode < 300 && responseBody != null) {
+                MappingListResponse mappingResponse = objectMapper.readValue(responseBody, MappingListResponse.class);
                 
                 if (mappingResponse != null && mappingResponse.isSuccess() && mappingResponse.getData() != null) {
                     List<EncryptionMapping> mappings = mappingResponse.getData();
@@ -126,11 +119,11 @@ public class MappingSyncService {
                     return 0;
                 }
             } else {
-                log.warn("⚠️ Hub에서 정책 매핑 정보 로드 실패: HTTP {}", response.statusCode());
+                log.warn("⚠️ Hub에서 정책 매핑 정보 로드 실패: HTTP {}", statusCode);
                 return 0;
             }
             
-        } catch (Exception e) {
+        } catch (IOException e) {
             log.error("❌ Hub에서 정책 매핑 정보 로드 실패: {}", e.getMessage());
             // 로드 실패해도 계속 진행 (Fail-open)
             return 0;

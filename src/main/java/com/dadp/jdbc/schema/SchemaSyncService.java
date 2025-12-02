@@ -1,15 +1,13 @@
 package com.dadp.jdbc.schema;
 
+import com.dadp.jdbc.http.HttpClientAdapter;
 import com.dadp.jdbc.policy.SchemaRecognizer;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.security.MessageDigest;
 import java.sql.Connection;
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -19,10 +17,10 @@ import org.slf4j.LoggerFactory;
  * 스키마 동기화 서비스
  * 
  * Proxy에서 Hub로 스키마 메타데이터를 전송합니다.
- * JDK 내장 HttpClient를 사용하여 Spring 의존성 없이 동작합니다.
+ * Java 버전에 따라 적절한 HTTP 클라이언트를 자동으로 선택합니다.
  * 
  * @author DADP Development Team
- * @version 3.0.0
+ * @version 3.0.5
  * @since 2025-11-07
  */
 public class SchemaSyncService {
@@ -31,7 +29,7 @@ public class SchemaSyncService {
     
     private final String hubUrl;
     private final String proxyInstanceId;
-    private final HttpClient httpClient;
+    private final HttpClientAdapter httpClient;
     private final ObjectMapper objectMapper;
     private final SchemaRecognizer schemaRecognizer;
     
@@ -41,9 +39,8 @@ public class SchemaSyncService {
     public SchemaSyncService(String hubUrl, String proxyInstanceId) {
         this.hubUrl = hubUrl;
         this.proxyInstanceId = proxyInstanceId;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        // Java 버전에 따라 적절한 HTTP 클라이언트 자동 선택
+        this.httpClient = HttpClientAdapter.Factory.create(5000, 10000);
         this.objectMapper = new ObjectMapper();
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.schemaRecognizer = new SchemaRecognizer();
@@ -86,17 +83,15 @@ public class SchemaSyncService {
             
             String requestBody = objectMapper.writeValueAsString(request);
             
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(syncUrl))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .build();
+            // Java 버전에 따라 적절한 HTTP 클라이언트 사용
+            URI uri = URI.create(syncUrl);
+            HttpClientAdapter.HttpResponse response = httpClient.post(uri, requestBody);
             
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            int statusCode = response.getStatusCode();
+            String responseBody = response.getBody();
             
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                SchemaSyncResponse syncResponse = objectMapper.readValue(response.body(), SchemaSyncResponse.class);
+            if (statusCode >= 200 && statusCode < 300 && responseBody != null) {
+                SchemaSyncResponse syncResponse = objectMapper.readValue(responseBody, SchemaSyncResponse.class);
                 if (syncResponse != null && syncResponse.isSuccess()) {
                     // 동기화 성공 시 해시 저장
                     lastSchemaHash.put(proxyInstanceId, currentHash);
@@ -106,7 +101,7 @@ public class SchemaSyncService {
                     log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: 응답 없음");
                 }
             } else {
-                log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: HTTP {}", response.statusCode());
+                log.warn("⚠️ Hub로 스키마 메타데이터 동기화 실패: HTTP {}", statusCode);
             }
             
         } catch (Exception e) {

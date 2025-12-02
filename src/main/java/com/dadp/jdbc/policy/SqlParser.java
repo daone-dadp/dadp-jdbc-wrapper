@@ -39,38 +39,65 @@ public class SqlParser {
         Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
     
-    /**
-     * SQL 파싱 결과
-     */
-    public static class SqlParseResult {
-        private String tableName;
-        private String[] columns;
-        private String sqlType; // INSERT, UPDATE, SELECT
-        
-        public String getTableName() {
-            return tableName;
-        }
-        
-        public void setTableName(String tableName) {
-            this.tableName = tableName;
-        }
-        
-        public String[] getColumns() {
-            return columns;
-        }
-        
-        public void setColumns(String[] columns) {
-            this.columns = columns;
-        }
-        
-        public String getSqlType() {
-            return sqlType;
-        }
-        
-        public void setSqlType(String sqlType) {
-            this.sqlType = sqlType;
-        }
+/**
+ * SQL 파싱 결과
+ */
+public static class SqlParseResult {
+    private String tableName;
+    private String[] columns;
+    private String sqlType; // INSERT, UPDATE, SELECT
+    // alias -> 원본 컬럼명 매핑 (Hibernate 지원용)
+    private java.util.Map<String, String> aliasToColumnMap = new java.util.HashMap<>();
+    
+    public String getTableName() {
+        return tableName;
     }
+    
+    public void setTableName(String tableName) {
+        this.tableName = tableName;
+    }
+    
+    public String[] getColumns() {
+        return columns;
+    }
+    
+    public void setColumns(String[] columns) {
+        this.columns = columns;
+    }
+    
+    public String getSqlType() {
+        return sqlType;
+    }
+    
+    public void setSqlType(String sqlType) {
+        this.sqlType = sqlType;
+    }
+    
+    /**
+     * alias → 원본 컬럼명 매핑 추가
+     */
+    public void addAliasMapping(String alias, String originalColumn) {
+        aliasToColumnMap.put(alias.toLowerCase(), originalColumn.toLowerCase());
+    }
+    
+    /**
+     * alias로 원본 컬럼명 조회
+     * @param alias 컬럼 별칭 (예: email3_0_)
+     * @return 원본 컬럼명 (예: email), 매핑이 없으면 입력값 반환
+     */
+    public String getOriginalColumnName(String alias) {
+        if (alias == null) return null;
+        String original = aliasToColumnMap.get(alias.toLowerCase());
+        return original != null ? original : alias;
+    }
+    
+    /**
+     * alias 매핑 존재 여부
+     */
+    public boolean hasAliasMapping() {
+        return !aliasToColumnMap.isEmpty();
+    }
+}
     
     /**
      * SQL 파싱
@@ -186,47 +213,73 @@ public class SqlParser {
         return null;
     }
     
-    /**
-     * SELECT 문 파싱
-     */
-    private SqlParseResult parseSelect(String sql) {
-        Matcher matcher = SELECT_PATTERN.matcher(sql);
-        if (matcher.find()) {
-            SqlParseResult result = new SqlParseResult();
-            result.setSqlType("SELECT");
-            // FROM 절에서 테이블명 추출 (별칭 제거)
-            // matcher.group(2)는 "users" (별칭은 이미 정규식에서 제외됨)
-            String tableName = matcher.group(2).trim();
-            result.setTableName(tableName);
-            
-            // SELECT 절의 컬럼 목록 추출
-            String selectClause = matcher.group(1);
-            String[] columns;
-            if (selectClause.trim().equals("*")) {
-                // * 인 경우는 나중에 ResultSetMetaData로 확인
-                columns = new String[0];
-            } else {
-                columns = selectClause.split(",");
-                for (int i = 0; i < columns.length; i++) {
-                    String col = columns[i].trim();
-                    // table.col 또는 col 형식 처리
-                    int dotIndex = col.lastIndexOf('.');
-                    if (dotIndex > 0) {
-                        col = col.substring(dotIndex + 1);
-                    }
-                    // 별칭 처리 (AS alias)
-                    int asIndex = col.toUpperCase().lastIndexOf(" AS ");
-                    if (asIndex > 0) {
-                        col = col.substring(asIndex + 4).trim();
-                    }
-                    columns[i] = col;
+/**
+ * SELECT 문 파싱
+ * 
+ * Hibernate alias 패턴 지원:
+ * - user0_.email as email3_0_ → alias 매핑: email3_0_ → email
+ */
+private SqlParseResult parseSelect(String sql) {
+    Matcher matcher = SELECT_PATTERN.matcher(sql);
+    if (matcher.find()) {
+        SqlParseResult result = new SqlParseResult();
+        result.setSqlType("SELECT");
+        // FROM 절에서 테이블명 추출 (별칭 제거)
+        // matcher.group(2)는 "users" (별칭은 이미 정규식에서 제외됨)
+        String tableName = matcher.group(2).trim();
+        result.setTableName(tableName);
+        
+        // SELECT 절의 컬럼 목록 추출
+        String selectClause = matcher.group(1);
+        java.util.List<String> columnList = new java.util.ArrayList<>();
+        
+        if (selectClause.trim().equals("*")) {
+            // * 인 경우는 나중에 ResultSetMetaData로 확인
+        } else {
+            String[] rawColumns = selectClause.split(",");
+            for (String rawCol : rawColumns) {
+                String col = rawCol.trim();
+                String originalColumnName = null;
+                String aliasName = null;
+                
+                // 별칭 처리 (AS alias) - 대소문자 구분 없이 처리
+                int asIndex = col.toUpperCase().lastIndexOf(" AS ");
+                if (asIndex > 0) {
+                    // "user0_.email as email3_0_" → aliasName = "email3_0_"
+                    aliasName = col.substring(asIndex + 4).trim();
+                    col = col.substring(0, asIndex).trim();
                 }
+                
+                // table.col 또는 col 형식에서 원본 컬럼명 추출
+                int dotIndex = col.lastIndexOf('.');
+                if (dotIndex > 0) {
+                    // "user0_.email" → originalColumnName = "email"
+                    originalColumnName = col.substring(dotIndex + 1).trim();
+                } else {
+                    originalColumnName = col;
+                }
+                
+                // alias 매핑 추가 (Hibernate 지원)
+                if (aliasName != null && originalColumnName != null) {
+                    result.addAliasMapping(aliasName, originalColumnName);
+                    log.trace("🔍 alias 매핑 추가: {} → {}", aliasName, originalColumnName);
+                }
+                
+                // 원본 컬럼명 저장
+                columnList.add(originalColumnName);
             }
-            result.setColumns(columns);
-            
-            return result;
         }
-        return null;
+        
+        result.setColumns(columnList.toArray(new String[0]));
+        
+        if (result.hasAliasMapping()) {
+            log.debug("🔍 SELECT 파싱 완료: table={}, aliasMapping=true ({}개)", 
+                     tableName, columnList.size());
+        }
+        
+        return result;
     }
+    return null;
+}
 }
 
